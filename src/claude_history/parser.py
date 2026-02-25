@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Generator
@@ -7,27 +8,25 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
-from claude_history.models import Session, Turn
+from claude_history.models import Session
+from claude_history.models import Turn
 
 log = logging.getLogger(__name__)
 
 _TRANSCRIPTS_ROOT = Path.home() / ".claude" / "projects"
 
-_SKIP_TYPES = frozenset({"progress", "system", "file-history-snapshot"})
 
-
-def _extract_text(content: str | list) -> str | None:
+def _extract_text(content: str | list) -> str:
     if isinstance(content, str):
-        return content.strip() or None
+        return content.strip()
     if isinstance(content, list):
         parts = [
             block["text"]
             for block in content
             if isinstance(block, dict) and block.get("type") == "text"
         ]
-        text = " ".join(parts).strip()
-        return text or None
-    return None
+        return "\n\n".join(parts).strip()
+    return ""
 
 
 def _parse_ts(raw: str | None) -> datetime | None:
@@ -39,14 +38,23 @@ def _parse_ts(raw: str | None) -> datetime | None:
         return None
 
 
+def _session_id_from_stem(stem: str) -> str:
+    """Return a canonical UUID string from a file stem. Non-UUID stems are hashed."""
+    try:
+        UUID(stem)
+        return stem
+    except ValueError:
+        return str(UUID(hashlib.md5(stem.encode()).hexdigest()))  # noqa: S324
+
+
 def iter_sessions(
     root: Path | None = None,
     include_subagents: bool = True,
 ) -> Generator[tuple[Session, list[Turn]], None, None]:
     root = root or _TRANSCRIPTS_ROOT
-    pattern = "**/*.jsonl" if include_subagents else "*/*.jsonl"
-
-    for path in sorted(root.glob(pattern), key=lambda p: p.stat().st_mtime):
+    for path in sorted(root.glob("**/*.jsonl"), key=lambda p: p.stat().st_mtime):
+        if not include_subagents and "/subagents/" in str(path):
+            continue
         try:
             result = parse_session_file(path)
         except Exception:
@@ -57,23 +65,20 @@ def iter_sessions(
 
 
 def parse_session_file(path: Path) -> tuple[Session, list[Turn]] | None:
-    turns: list[Turn] = []
-    session_id_str: str | None = None
-    project_path_str: str | None = None
+    """Parse a JSONL transcript. session_id is always taken from the filename stem."""
+    is_subagent = "/subagents/" in str(path)
+    session_id = _session_id_from_stem(path.stem)
+
+    # Metadata from first record regardless of type
+    project_path: str | None = None
+    git_branch: str | None = None
     cc_version: str | None = None
-    started_at: datetime | None = None
 
-    # Derive project_name and project_path from the file path.
-    # Structure: ~/.claude/projects/<encoded-path>/<session-id>.jsonl
-    # or:        ~/.claude/projects/<encoded-path>/<session-id>/subagents/agent-<id>.jsonl
-    parts = path.relative_to(_TRANSCRIPTS_ROOT).parts
-    encoded = parts[0]
-    project_path_str = encoded.replace("-", "/").lstrip("/")
-    project_name = project_path_str.rsplit("/", 1)[-1]
-
+    turns: list[Turn] = []
     seq = 0
-    with path.open() as f:
-        for line in f:
+
+    with path.open() as fh:
+        for line in fh:
             line = line.strip()
             if not line:
                 continue
@@ -82,34 +87,52 @@ def parse_session_file(path: Path) -> tuple[Session, list[Turn]] | None:
             except json.JSONDecodeError:
                 continue
 
+            # Extract metadata from the very first parseable record
+            if project_path is None:
+                project_path = record.get("cwd", "")
+                git_branch = record.get("gitBranch")
+                cc_version = record.get("version")
+
             rtype = record.get("type")
-            if rtype in _SKIP_TYPES:
+
+            if rtype in ("progress", "file-history-snapshot"):
                 continue
 
             if rtype == "system":
-                session_id_str = record.get("sessionId") or session_id_str
-                cc_version = record.get("cliVersion") or cc_version
+                if record.get("subtype") != "local_command":
+                    continue
+                ts = _parse_ts(record.get("timestamp"))
+                turns.append(
+                    Turn(
+                        session_id=session_id,
+                        seq=seq,
+                        role="system",
+                        content_raw={
+                            "subtype": "local_command",
+                            "content": record.get("content"),
+                        },
+                        content_text="",
+                        ts=ts,
+                    )
+                )
+                seq += 1
                 continue
 
             if rtype not in ("user", "assistant"):
                 continue
 
             msg = record.get("message", {})
-            content = msg.get("content", "")
-            text = _extract_text(content)
-            if not text:
-                continue
-
+            raw_content = msg.get("content", "")
+            content_text = _extract_text(raw_content)
             ts = _parse_ts(record.get("timestamp"))
-            if started_at is None:
-                started_at = ts
 
             turns.append(
                 Turn(
-                    session_id=UUID(int=0),  # patched below
+                    session_id=session_id,
                     seq=seq,
                     role=rtype,
-                    content=text,
+                    content_raw=raw_content,
+                    content_text=content_text,
                     ts=ts,
                 )
             )
@@ -118,25 +141,17 @@ def parse_session_file(path: Path) -> tuple[Session, list[Turn]] | None:
     if not turns:
         return None
 
-    # Fall back to filename stem as session ID if not found in records.
-    raw_id = session_id_str or path.stem
-    try:
-        sid = UUID(raw_id)
-    except ValueError:
-        import hashlib
-        sid = UUID(hashlib.md5(raw_id.encode()).hexdigest())  # noqa: S324
-
-    for turn in turns:
-        turn.session_id = sid
+    project_path = project_path or ""
+    project_name = Path(project_path).name if project_path else ""
 
     session = Session(
-        session_id=sid,
-        project_path=project_path_str,
+        session_id=session_id,
+        project_path=project_path,
         project_name=project_name,
-        git_branch=None,
+        git_branch=git_branch,
         cc_version=cc_version,
-        started_at=started_at,
-        ended_at=turns[-1].ts if turns else None,
-        turn_count=len(turns),
+        started_at=turns[0].ts,
+        ended_at=turns[-1].ts,
+        is_subagent=is_subagent,
     )
     return session, turns

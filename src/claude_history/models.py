@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 if TYPE_CHECKING:
     pass
@@ -11,21 +10,24 @@ if TYPE_CHECKING:
 
 @dataclass
 class Session:
-    session_id: UUID
+    session_id: str
     project_path: str
     project_name: str
     git_branch: str | None
     cc_version: str | None
     started_at: datetime | None
     ended_at: datetime | None
-    turn_count: int = 0
+    is_subagent: bool
+    title: str | None = None
 
 
 @dataclass
 class Turn:
-    session_id: UUID
+    session_id: str
     seq: int
-    role: str  # 'user' | 'assistant'
-    content: str
+    role: str  # 'user' | 'assistant' | 'system'
+    content_raw: list | dict
+    content_text: str  # extracted text blocks; '' for tool-only / local_command turns
     ts: datetime | None
+    # Not set by parser.py; populated after DB upsert / embedding
     embedding: list[float] | None = None

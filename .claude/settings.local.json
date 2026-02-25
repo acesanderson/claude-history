@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python3:*)",
       "Bash(sort:*)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(uv run:*)"
     ]
   }
 }

@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "claude-history"
 version = "0.1.0"
 description = "Local store for Claude Code session transcripts with FTS and semantic search"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "psycopg2-binary",

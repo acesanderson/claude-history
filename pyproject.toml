@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-history"
+version = "0.1.0"
+description = "Local store for Claude Code session transcripts with FTS and semantic search"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg2-binary",
+    "pgvector",
+    "tiktoken",
+    "jinja2",
+    "conduit",
+    "dbclients",
+    "rich",
+    "click",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claude_history"]
+sources = ["src"]
+include = ["src/claude_history/py.typed"]
+
+[project.scripts]
+ch-ingest         = "claude_history.cli:ingest"
+ch-search         = "claude_history.cli:search"
+ch-resolve-titles = "claude_history.cli:resolve_titles"
+
+[tool.uv.sources]
+dbclients = { path = "../../Brian_Code/dbclients-project", editable = true }
+conduit   = { path = "../../Brian_Code/conduit-project",   editable = true }
+
+[tool.pytest.ini_options]
+addopts = "-v -s --tb=short --no-header --showlocals --pdb -x"
+log_cli = true
+log_cli_level = "INFO"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "F", "E",
+    "UP",
+    "SIM",
+    "ARG",
+    "B",
+    "RUF",
+    "S102", "S103", "S108",
+    "PERF",
+    "FBT003",
+]
+ignore = [
+    "SIM118",
+    "ARG001", "ARG002",
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "ARG", "FBT"]
+"scripts/**/*.py" = ["ARG", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["claude_history"]
+force-sort-within-sections = true
+split-on-trailing-comma = true

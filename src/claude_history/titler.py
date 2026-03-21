@@ -69,6 +69,6 @@ def generate_title(turns: list[Turn]) -> str | None:
 
     prompt = _PROMPT_TEMPLATE.render(transcript=transcript)
     model = RemoteModelSync(model="gpt-oss:latest")
-    result = model.complete(prompt)
+    result = model.query(prompt)
     title = result.content.strip()
     return title or None

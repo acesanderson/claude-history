@@ -35,15 +35,24 @@ def fts(
     return results
 
 
+def _embed_query(query: str) -> list[float]:
+    from conduit.embeddings.generate_embeddings import generate_embeddings
+
+    vecs = generate_embeddings(
+        ["query"],
+        [query],
+        model="sentence-transformers/all-MiniLM-L6-v2",
+    )
+    return vecs[0]
+
+
 def semantic(
     query: str,
     include_subagents: bool = False,
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict]:
-    from conduit.embeddings.generate_embeddings import quick_embedding
-
-    vec = quick_embedding(query, model="sentence-transformers/all-MiniLM-L6-v2")
+    vec = _embed_query(query)
     with _open_conn(_db_name()) as conn:
         return db.search_vector(
             conn, vec, include_subagents=include_subagents, limit=limit, offset=offset
@@ -70,9 +79,7 @@ def hybrid(
             r.setdefault("score", None)
         return fts_rows[offset : offset + limit]
 
-    from conduit.embeddings.generate_embeddings import quick_embedding
-
-    vec = quick_embedding(query, model="sentence-transformers/all-MiniLM-L6-v2")
+    vec = _embed_query(query)
 
     with _open_conn(_db_name()) as conn:
         vec_rows = db.search_vector(

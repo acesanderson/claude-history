@@ -27,6 +27,7 @@ include = ["src/claude_history/py.typed"]
 ch-ingest         = "claude_history.cli:ingest"
 ch-search         = "claude_history.cli:search"
 ch-resolve-titles = "claude_history.cli:resolve_titles"
+ch-history        = "claude_history.viz:main"
 
 [tool.uv.sources]
 dbclients = { path = "../../Brian_Code/dbclients-project", editable = true }
